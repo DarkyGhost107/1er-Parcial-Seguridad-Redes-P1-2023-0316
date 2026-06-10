@@ -1,6 +1,9 @@
 ! =====================================================================
-!  SW2-ACCESO | Segundo switch de acceso
-! =====================================================================
+!  SW2-ACCESO | Switch de acceso secundario
+!  gig0/0 → TRUNK hacia SW1-ACCESO
+!  gig0/1 → Acceso VLAN10 (VPCS adicional)
+!  gig0/2 → Acceso VLAN10 (VM Kali - atacante)
+!  =====================================================================
 enable
 configure terminal
 !
@@ -13,7 +16,9 @@ enable secret Cisco$2025
 service password-encryption
 !
 banner motd #
+====================================================
   ACCESO RESTRINGIDO - SOLO PERSONAL AUTORIZADO
+====================================================
 #
 !
 vlan 10
@@ -23,21 +28,21 @@ vlan 20
 vlan 99
  name ADMINISTRATIVA
 !
-! --- Gestion remota ---
 interface vlan 99
  ip address 20.23.3.195 255.255.255.224
  no shutdown
 !
 ip default-gateway 20.23.3.193
 !
-! --- Trunk hacia SW1 ---
-interface g0/1
+interface gig0/0
+ description TRUNK-SW1-ACCESO
  switchport mode trunk
  switchport trunk allowed vlan 10,20,99
  switchport nonegotiate
+ no shutdown
 !
-! --- Puertos de acceso con Port-Security ---
-interface range f0/1 - 12
+interface gig0/1
+ description PC-VLAN10
  switchport mode access
  switchport access vlan 10
  switchport port-security
@@ -46,13 +51,35 @@ interface range f0/1 - 12
  switchport port-security mac-address sticky
  spanning-tree portfast
  spanning-tree bpduguard enable
+ no shutdown
 !
-! --- Interfaces no utilizadas apagadas ---
-interface range f0/13 - 24
+interface gig0/2
+ description KALI-ATACANTE-LAB
+ switchport mode access
+ switchport access vlan 10
+ switchport port-security
+ switchport port-security maximum 2
+ switchport port-security violation shutdown
+ switchport port-security mac-address sticky
+ spanning-tree portfast
+ spanning-tree bpduguard enable
+ no shutdown
+!
+interface gig0/3
  shutdown
+interface gig1/0
+ shutdown
+interface gig1/1
+ shutdown
+!
+ip dhcp snooping
+ip dhcp snooping vlan 10,20
+interface gig0/0
+ ip dhcp snooping trust
 !
 crypto key generate rsa modulus 1024
 ip ssh version 2
+login block-for 120 attempts 3 within 60
 !
 line console 0
  login local
@@ -63,8 +90,6 @@ line vty 0 4
  transport input ssh
  login local
  exec-timeout 5 0
-!
-login block-for 120 attempts 3 within 60
 !
 end
 write memory

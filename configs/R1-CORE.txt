@@ -1,5 +1,6 @@
 ! =====================================================================
-!  R1-CORE  | Router principal (router-on-a-stick + DHCP + ruteo + ACL)
+!  R1-CORE | Router principal (router-on-a-stick + DHCP + ACL + SSH)
+!  Interfaces: fa0/0 (WAN), fa1/0 (trunk hacia SW1)
 !  Direccionamiento base: 20.23.3.0/24 (matricula 2023-0316)
 ! =====================================================================
 enable
@@ -7,44 +8,53 @@ configure terminal
 !
 hostname R1-CORE
 !
-! --- Deshabilitar busqueda DNS ---
 no ip domain-lookup
-!
-! --- Dominio + usuario local (secret usa hash MD5 tipo 5) ---
 ip domain-name lab.local
 username admin privilege 15 secret Cisco$2025
 enable secret Cisco$2025
 service password-encryption
 !
-! --- Banner de advertencia ---
 banner motd #
 ====================================================
   ACCESO RESTRINGIDO - SOLO PERSONAL AUTORIZADO
-  Cualquier acceso no autorizado sera registrado
-  y reportado conforme a la ley.
+  Todo acceso no autorizado sera registrado.
 ====================================================
 #
 !
-! --- Subinterfaces 802.1Q (router-on-a-stick) ---
-interface g0/0
+! --- Enlace WAN hacia R2-BORDER ---
+interface fa0/0
+ description ENLACE-WAN-R2
+ ip address 20.23.3.225 255.255.255.252
  no shutdown
 !
-interface g0/0.10
+! --- Apagar interfaces no utilizadas ---
+interface fa2/0
+ shutdown
+interface fa2/1
+ shutdown
+interface fa3/0
+ shutdown
+interface fa3/1
+ shutdown
+interface fa4/0
+ shutdown
+!
+! --- Trunk 802.1Q hacia SW1 ---
+interface fa1/0
+ description TRUNK-SW1
+ no shutdown
+!
+interface fa1/0.10
  encapsulation dot1Q 10
  ip address 20.23.3.1 255.255.255.128
 !
-interface g0/0.20
+interface fa1/0.20
  encapsulation dot1Q 20
  ip address 20.23.3.129 255.255.255.192
 !
-interface g0/0.99
+interface fa1/0.99
  encapsulation dot1Q 99
  ip address 20.23.3.193 255.255.255.224
-!
-! --- Enlace WAN (router-router) /30 ---
-interface g0/1
- ip address 20.23.3.225 255.255.255.252
- no shutdown
 !
 ! --- DHCP para estaciones de trabajo ---
 ip dhcp excluded-address 20.23.3.1 20.23.3.10
@@ -60,30 +70,30 @@ ip dhcp pool VLAN20_OPERACIONES
  default-router 20.23.3.129
  dns-server 8.8.8.8
 !
-! --- Enrutamiento estatico (ejemplo hacia red remota detras de R2) ---
+! --- Enrutamiento estatico hacia R2 ---
 ip route 192.168.1.0 255.255.255.0 20.23.3.226
 !
-! ===================== ACL =====================
-! ACL 1: Operaciones (VLAN20) NO accede a la VLAN Administrativa (VLAN99)
+! --- ACL 1: Operaciones NO accede a VLAN Administrativa ---
 access-list 110 deny   ip 20.23.3.128 0.0.0.63 20.23.3.192 0.0.0.31
 access-list 110 permit ip any any
-interface g0/0.20
+interface fa1/0.20
  ip access-group 110 in
 !
-! ACL 2: Ventas (VLAN10) NO accede a Operaciones (VLAN20)
+! --- ACL 2: Ventas NO accede a Operaciones ---
 access-list 120 deny   ip 20.23.3.0 0.0.0.127 20.23.3.128 0.0.0.63
 access-list 120 permit ip any any
-interface g0/0.10
+interface fa1/0.10
  ip access-group 120 in
 !
-! ACL 3 (estandar nombrada): solo la VLAN Administrativa puede SSH al router
+! --- ACL 3: Solo VLAN Administrativa puede hacer SSH al router ---
 ip access-list standard ADMIN-SSH
  permit 20.23.3.192 0.0.0.31
  deny   any
 !
-! --- SSH (acceso remoto unicamente por SSH) ---
+! --- SSH ---
 crypto key generate rsa modulus 1024
 ip ssh version 2
+login block-for 120 attempts 3 within 60
 !
 line console 0
  login local
@@ -95,9 +105,6 @@ line vty 0 4
  login local
  access-class ADMIN-SSH in
  exec-timeout 5 0
-!
-! --- Seguridad adicional: bloqueo por intentos fallidos ---
-login block-for 120 attempts 3 within 60
 !
 end
 write memory
