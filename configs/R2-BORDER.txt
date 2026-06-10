@@ -1,0 +1,57 @@
+! =====================================================================
+!  R2-BORDER | Router de borde hacia Internet
+!  Enlace WAN hacia R1: 20.23.3.224/30
+!  Red simulada de Internet/remota: 192.168.1.0/24 (LAN local de R2)
+! =====================================================================
+enable
+configure terminal
+!
+hostname R2-BORDER
+!
+no ip domain-lookup
+ip domain-name lab.local
+username admin privilege 15 secret Cisco$2025
+enable secret Cisco$2025
+service password-encryption
+!
+banner motd #
+====================================================
+  ACCESO RESTRINGIDO - SOLO PERSONAL AUTORIZADO
+====================================================
+#
+!
+! --- Interfaz WAN hacia R1-CORE (/30) ---
+interface g0/0
+ description ENLACE-WAN-R1
+ ip address 20.23.3.226 255.255.255.252
+ no shutdown
+!
+! --- Interfaz LAN "Internet" simulada ---
+interface g0/1
+ description RED-INTERNET-SIMULADA
+ ip address 192.168.1.1 255.255.255.0
+ no shutdown
+!
+! --- Ruta estatica de regreso hacia las VLANs de R1 ---
+! (Para que R2 sepa como llegar a las redes internas)
+ip route 20.23.3.0 255.255.255.128 20.23.3.225   ! VLAN10 Ventas
+ip route 20.23.3.128 255.255.255.192 20.23.3.225  ! VLAN20 Operaciones
+ip route 20.23.3.192 255.255.255.224 20.23.3.225  ! VLAN99 Administrativa
+!
+! --- SSH ---
+crypto key generate rsa modulus 1024
+ip ssh version 2
+login block-for 120 attempts 3 within 60
+!
+line console 0
+ login local
+ exec-timeout 5 0
+ no logging synchronous
+!
+line vty 0 4
+ transport input ssh
+ login local
+ exec-timeout 5 0
+!
+end
+write memory
